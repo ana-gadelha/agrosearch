@@ -26,8 +26,51 @@ def normalizar(tokens):
         resultado.append(token)
     return resultado
 
+STOPWORDS = {
+    "a", "o", "as", "os", "um", "uma", "de", "da", "do", "das", "dos",
+    "e", "em", "no", "na", "nos", "nas", "por", "para", "com", "sem",
+    "ao", "aos", "que", "se", "ou", "mas", "como", "mais", "pode",
+    "ser", "feito", "durante", "e", "sao", "foi", "tem",
+}
+
+def remover_stopwords(tokens):
+    return [token for token in tokens if token not in STOPWORDS]    
+
+SUFIXOS = [
+    ("mente", 4), ("amento", 3), ("imento", 3), ("acao", 3), ("icao", 3),
+    ("idade", 4), ("adoras", 3), ("adora", 3), ("ador", 3), ("ismo", 3),
+    ("avel", 3), ("ivel", 3), ("oso", 3), ("osa", 3), ("ico", 3), ("ica", 3),
+    ("ante", 3), ("ente", 3), ("ura", 3), ("agem", 3),
+    ("ando", 2), ("endo", 2), ("indo", 2), ("ado", 2), ("ada", 2), ("ido", 2),
+    ("am", 2), ("ar", 2), ("er", 2), ("ir", 2),
+    ("as", 3), ("es", 3), ("os", 3), ("s", 3),
+    ("a", 3), ("e", 3), ("o", 3),
+]
+
+def stem(palavra):
+    for sufixo, minimo in SUFIXOS:
+        if palavra.endswith(sufixo) and len(palavra) - len(sufixo) >= minimo:
+            return palavra[: -len(sufixo)]
+    return palavra
+
+def aplicar_stemming(tokens):
+    return [stem(token) for token in tokens]
+
+
+#Pipeline completo (juntas as quatro etapas numa única função)
+def preprocessar(texto, usar_stopwords, usar_stemming):
+    tokens = normalizar(tokenizar(texto))
+    if usar_stopwords:
+        tokens = remover_stopwords(tokens)
+    if usar_stemming:
+        tokens = aplicar_stemming(tokens)
+    return tokens
 
 st.title("AgroSearch")
+with st.sidebar:
+    st.header("Pré-processamento")
+    usar_stopwords = st.checkbox ("Remover stopwords", value=True)
+    usar_stemming = st.checkbox ("Aplicar Stemming", value=True)
 
 with st.form("form_documento"):
     doc = st.selectbox("Escolha um documento", list(DOCUMENTOS.keys()))
@@ -35,8 +78,21 @@ with st.form("form_documento"):
 
 texto = DOCUMENTOS[doc]
 tokens = tokenizar(texto)
+normalizados = normalizar(tokens)
+sem_stopwords = remover_stopwords(normalizados) if usar_stopwords else normalizados
+com_stemming = aplicar_stemming(sem_stopwords) if usar_stemming else sem_stopwords
 
-st.write("Documento Selecionado: {doc}")
+st.write(f"Documento Selecionado: {doc}")
 st.write("Texto Original:", texto)
 st.write("1. Tokenização:", tokens)
-st.write("2. Normalização:", normalizar(tokens))
+st.write("2. Normalização:", normalizados)
+st.write("3. Sem stopwords", sem_stopwords)
+st.write("4. Stemming", com_stemming)
+
+
+vocabulario = set()
+for texto_doc in DOCUMENTOS.values():
+    vocabulario.update(preprocessar(texto_doc, usar_stopwords, usar_stemming))
+
+st.metric("Tamanho do vocabulário", len(vocabulario))
+st.write(sorted(vocabulario))
