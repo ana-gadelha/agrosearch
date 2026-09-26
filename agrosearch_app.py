@@ -1,6 +1,7 @@
 import re
 import unicodedata
 import pandas as pd
+import math
 import streamlit as st
 
 
@@ -76,6 +77,36 @@ def construir_indice_invertido(docs_tokens):
                 indice[termo].append(doc_id)
     return dict(sorted(indice.items()))
 
+# Terceira Fase
+def calcular_tf(tokens):
+    tf = {}
+    total = len(tokens)
+    for termo in tokens:
+        tf[termo] = tf.get(termo, 0) + 1
+    for termo in tf:
+        tf[termo] = tf[termo] / total
+    return tf
+
+def calcular_idf(indice, n_docs):
+    idf = {}
+    for termo, docs in indice.items():
+        idf[termo] = math.log10(n_docs / len(docs))
+    return idf
+
+def vetor_tfidf(tokens, idf):
+    tf = calcular_tf(tokens)
+    return {termo: tf[termo] * idf.get(termo, 0) for termo in tf}
+
+# Similaridade de cosseno entre dois vetores
+def cosseno(v1, v2):
+    produto = sum(v1[t] * v2.get(t, 0) for t in v1)
+    norma1 = math.sqrt(sum(x * x for x in v1.values()))
+    norma2 = math.sqrt(sum(x * x for x in v2.values()))
+    if norma1 == 0 or norma2 == 0:
+        return 0.0
+    return produto / (norma1 * norma2)
+
+
 st.title("AgroSearch")
 with st.sidebar:
     st.header("Pré-processamento")
@@ -126,3 +157,59 @@ tabela_indice = pd.DataFrame({
     "df (nº de docs)": [len(docs) for docs in indice.values()],
 })
 st.dataframe(tabela_indice, hide_index=True)
+
+st.divider()
+st.header("Fase 3 — Busca e Ranqueamento TF-IDF")
+st.latex(r"TF(t,d)=\frac{f(t,d)}{|d|} \qquad IDF(t)=\log_{10}\frac{N}{df(t)} \qquad TF\text{-}IDF = TF \times IDF")
+
+with st.form("form_busca"):
+    consulta = st.text_input("Digite sua consulta", value="lagartas na soja")
+    st.form_submit_button("🔍 Buscar")
+
+termos_consulta = preprocessar(consulta, usar_stopwords, usar_stemming)
+st.write("**Consulta pré-processada:**", termos_consulta)
+
+idf = calcular_idf(indice, len(docs_tokens))
+termos_validos = [t for t in dict.fromkeys(termos_consulta) if t in indice]
+
+if not termos_validos:
+    st.warning("Nenhum termo da consulta aparece nos documentos. Tente outras palavras.")
+else:
+    detalhe = []
+    for doc_id, toks in docs_tokens.items():
+        tf = calcular_tf(toks)
+        for termo in termos_validos:
+            detalhe.append({
+                "Documento": doc_id,
+                "Termo": termo,
+                "TF": round(tf.get(termo, 0), 4),
+                "IDF": round(idf[termo], 4),
+                "TF-IDF": round(tf.get(termo, 0) * idf[termo], 4),
+            })
+    detalhe = pd.DataFrame(detalhe)
+
+    # Ranking: soma do TF-IDF dos termos da consulta (TF-IDF acumulado)
+    ranking = detalhe.groupby("Documento", as_index=False)["TF-IDF"].sum()
+    ranking = ranking.rename(columns={"TF-IDF": "TF-IDF acumulado"})
+
+    # Similaridade de cosseno entre consulta e documento
+    vetor_consulta = vetor_tfidf(termos_consulta, idf)
+    ranking["Cosseno (bônus)"] = [
+        round(cosseno(vetor_consulta, vetor_tfidf(docs_tokens[d], idf)), 4) for d in ranking["Documento"]
+    ]
+    ranking["Texto"] = [DOCUMENTOS[d] for d in ranking["Documento"]]
+    ranking = ranking.sort_values(["TF-IDF acumulado", "Cosseno (bônus)"], ascending=False).reset_index(drop=True)
+    ranking["TF-IDF acumulado"] = ranking["TF-IDF acumulado"].round(4)
+
+    vencedor = ranking.iloc[0]
+    st.success(f"🏆 Documento vencedor: {vencedor['Documento']} (TF-IDF acumulado = {vencedor['TF-IDF acumulado']})")
+
+    def destacar_vencedor(linha):
+        cor = "background-color: rgba(46, 160, 67, 0.35)" if linha.name == 0 else ""
+        return [cor] * len(linha)
+
+    st.subheader("Ranking (maior → menor TF-IDF acumulado)")
+    st.dataframe(ranking.style.apply(destacar_vencedor, axis=1), hide_index=True)
+
+    st.subheader("Cálculo termo a termo")
+    st.dataframe(detalhe, hide_index=True)
