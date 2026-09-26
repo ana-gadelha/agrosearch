@@ -1,6 +1,6 @@
 import re
 import unicodedata
-
+import pandas as pd
 import streamlit as st
 
 
@@ -66,6 +66,16 @@ def preprocessar(texto, usar_stopwords, usar_stemming):
         tokens = aplicar_stemming(tokens)
     return tokens
 
+def construir_indice_invertido(docs_tokens):
+    indice = {}
+    for doc_id, tokens in docs_tokens.items():
+        for termo in tokens:
+            if termo not in indice:
+                indice[termo] = []
+            if doc_id not in indice[termo]:
+                indice[termo].append(doc_id)
+    return dict(sorted(indice.items()))
+
 st.title("AgroSearch")
 with st.sidebar:
     st.header("Pré-processamento")
@@ -96,3 +106,23 @@ for texto_doc in DOCUMENTOS.values():
 
 st.metric("Tamanho do vocabulário", len(vocabulario))
 st.write(sorted(vocabulario))
+
+st.divider()
+st.header("Segunda fase: Índice Invertido")
+
+docs_tokens = {}
+for doc_id, texto_doc in DOCUMENTOS.items():
+    docs_tokens[doc_id] = preprocessar(texto_doc, usar_stopwords, usar_stemming)
+
+indice = construir_indice_invertido(docs_tokens)
+
+st.subheader("Índice invertido (st.json)")
+st.json(indice)
+
+st.subheader("Índice invertido em tabela (st.dataframe)")
+tabela_indice = pd.DataFrame({
+    "Termo": list(indice.keys()),
+    "Documentos": [", ".join(docs) for docs in indice.values()],
+    "df (nº de docs)": [len(docs) for docs in indice.values()],
+})
+st.dataframe(tabela_indice, hide_index=True)
